@@ -1,0 +1,142 @@
+/* ── Quick Profile Switcher v1.5 ─────────────────────────────────────────── */
+
+#quick-profile-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0 6px;
+    color: var(--SmartThemeBodyColor);
+    opacity: 0.65;
+    transition: opacity 0.15s ease, color 0.15s ease;
+    flex-shrink: 0;
+    border-radius: 4px;
+}
+
+#quick-profile-btn:hover {
+    opacity: 1;
+    color: var(--SmartThemeQuoteColor, #8ecae6);
+}
+
+/* Ícone fica iluminado enquanto o dropdown está aberto */
+#quick-profile-btn.active {
+    opacity: 1;
+    color: var(--SmartThemeQuoteColor, #8ecae6);
+}
+
+/* ── Dropdown ────────────────────────────────────────────────────────────── */
+
+#qps-dropdown {
+    position: fixed;
+    background: var(--SmartThemeBlurTintColor, rgba(22, 22, 32, 0.97));
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.12));
+    border-radius: 10px;
+    min-width: 200px;
+    max-width: 290px;
+    max-height: 320px;
+    overflow: hidden;
+    z-index: 9999;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.6);
+    display: none;
+    flex-direction: column;
+    backdrop-filter: blur(14px);
+
+    /* Animação de entrada */
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+#qps-dropdown.open {
+    display: flex;
+    opacity: 1;
+    transform: translateY(0) scale(1);
+}
+
+.qps-header {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--SmartThemeQuoteColor, #8ecae6);
+    padding: 10px 14px 7px;
+    opacity: 0.7;
+    border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.08));
+    flex-shrink: 0;
+}
+
+.qps-items {
+    overflow-y: auto;
+    padding: 4px 0;
+}
+
+.qps-item {
+    padding: 8px 14px;
+    cursor: pointer;
+    font-size: 0.88rem;
+    color: var(--SmartThemeBodyColor);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: background 0.12s ease;
+    user-select: none;
+    position: relative;
+}
+
+.qps-item:hover {
+    background: rgba(255,255,255,0.07);
+}
+
+/* Item ativo: destaque de cor + fundo sutil */
+.qps-item.active {
+    color: var(--SmartThemeQuoteColor, #8ecae6);
+    background: rgba(142, 202, 230, 0.08);
+    font-weight: 600;
+}
+
+.qps-item.active:hover {
+    background: rgba(142, 202, 230, 0.13);
+}
+
+/* Item em processo de seleção (aguardando /profile) */
+.qps-item.loading {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+/* Ponto indicador: ocupa espaço fixo para alinhar todos os nomes */
+.qps-dot {
+    font-size: 0.4rem;
+    width: 10px;
+    text-align: center;
+    flex-shrink: 0;
+    color: var(--SmartThemeQuoteColor, #8ecae6);
+}
+
+.qps-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Checkmark à direita no item ativo */
+.qps-check {
+    font-size: 0.75rem;
+    opacity: 0.8;
+    flex-shrink: 0;
+    color: var(--SmartThemeQuoteColor, #8ecae6);
+}
+
+.qps-empty {
+    padding: 14px;
+    font-size: 0.82rem;
+    opacity: 0.45;
+    text-align: center;
+    line-height: 1.6;
+}
+
+.qps-items::-webkit-scrollbar { width: 3px; }
+.qps-items::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.15);
+    border-radius: 2px;
+}
