@@ -17,13 +17,13 @@ class QuickProfileSwitcher {
         this.btnEl = null;
         this.isOpen = false;
         this.isClosing = false;
-        
+
         this.cachedProfiles = [];
         this.activeProfile = null;
-        
+
         this.isRouletteEnabled = false;
         this.hasInitialized = false;
-        
+
         // Bind methods
         this.handleDocumentClick = this.handleDocumentClick.bind(this);
         this.handleDropdownClick = this.handleDropdownClick.bind(this);
@@ -33,17 +33,17 @@ class QuickProfileSwitcher {
         this.toggleDropdown = this.toggleDropdown.bind(this);
         this.injectButton = this.injectButton.bind(this);
     }
-    
+
     async init() {
         if (this.hasInitialized) return;
         this.hasInitialized = true;
-        
+
         await this.loadSlashCommandRunner();
         this.createDropdown();
         this.injectButton();
         this.registerEvents();
     }
-    
+
     async loadSlashCommandRunner() {
         try {
             const mod = await import('../../../script.js');
@@ -53,42 +53,52 @@ class QuickProfileSwitcher {
             this.executeSlashCommands = ctx.executeSlashCommandsWithOptions ?? ctx.executeSlashCommands ?? null;
         }
     }
-    
+
     registerEvents() {
         try {
             const { eventSource, event_types } = SillyTavern.getContext();
             if (event_types.CONNECTION_PROFILE_LOADED) {
                 eventSource.on(event_types.CONNECTION_PROFILE_LOADED, this.refreshState);
             }
-            
+
             // Roulette triggers on messages
             if (event_types.USER_MESSAGE_RENDERED) {
                 eventSource.on(event_types.USER_MESSAGE_RENDERED, this.onMessageRendered);
             }
             if (event_types.CHARACTER_MESSAGE_RENDERED) {
-                 eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, this.onMessageRendered);
+                eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, this.onMessageRendered);
             }
         } catch (e) {
             console.warn(`[${EXT_NAME}] Event registration issue:`, e);
         }
     }
-    
+
     async onMessageRendered() {
         if (!this.isRouletteEnabled) return;
         if (this.cachedProfiles.length < 2) return;
-        
+
         // Pick a random profile different from the current one
         const available = this.cachedProfiles.filter(p => p !== this.activeProfile);
         if (available.length === 0) return;
-        
+
         const randomProfile = available[Math.floor(Math.random() * available.length)];
         console.log(`[${EXT_NAME}] Roulette rolling to: ${randomProfile}`);
         // Troca silenciosa para não poluir os toasts
-        await this.switchProfile(randomProfile, true); 
+        const success = await this.switchProfile(randomProfile, true);
+
+        // Se trocou com sucesso, pisca o chevron com o efeito neon
+        if (success && this.btnEl) {
+            const icon = this.btnEl.querySelector('.qps-chevron-icon');
+            if (icon) {
+                icon.classList.remove('qps-roulette-success');
+                void icon.offsetWidth; // Força reflow para reiniciar a animação CSS
+                icon.classList.add('qps-roulette-success');
+            }
+        }
     }
-    
+
     // ── Slash commands ────────────────────────────────────────────────────────
-    
+
     async runCommand(cmd) {
         if (!this.executeSlashCommands) return null;
         try {
@@ -99,7 +109,7 @@ class QuickProfileSwitcher {
             return null;
         }
     }
-    
+
     async fetchProfiles() {
         try {
             const raw = await this.runCommand('/profile-list');
@@ -108,14 +118,14 @@ class QuickProfileSwitcher {
             return Array.isArray(parsed) ? parsed : [];
         } catch { return []; }
     }
-    
+
     async fetchActiveProfile() {
         try {
             const raw = await this.runCommand('/profile');
             return raw?.trim() || null;
         } catch { return null; }
     }
-    
+
     async switchProfile(name, silent = false) {
         try {
             await this.runCommand(`/profile ${name}`);
@@ -124,16 +134,18 @@ class QuickProfileSwitcher {
             if (this.isOpen) {
                 this.renderItems();
             }
+            return true;
         } catch (e) {
             console.error(`[${EXT_NAME}] Falha ao trocar:`, e);
             if (!silent && typeof toastr !== 'undefined') {
                 toastr.error(`Não foi possível trocar para "${name}"`, EXT_NAME);
             }
+            return false;
         }
     }
-    
+
     // ── DOM: botão ────────────────────────────────────────────────────────────
-    
+
     injectButton() {
         if (document.getElementById('quick-profile-btn')) return;
 
@@ -162,7 +174,7 @@ class QuickProfileSwitcher {
         `;
 
         this.btnEl.addEventListener('click', this.toggleDropdown);
-        
+
         // Permitir Enter/Espaço no botão principal
         this.btnEl.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -176,14 +188,14 @@ class QuickProfileSwitcher {
 
         this.refreshState();
     }
-    
+
     toggleDropdown() {
         if (this.isClosing) { this.isClosing = false; return; }
         this.isOpen ? this.closeDropdown() : this.openDropdown();
     }
-    
+
     // ── DOM: dropdown ─────────────────────────────────────────────────────────
-    
+
     createDropdown() {
         if (document.getElementById('qps-dropdown')) return;
 
@@ -195,11 +207,11 @@ class QuickProfileSwitcher {
 
         // Delegação de eventos de clique no dropdown (Performance)
         this.dropdownEl.addEventListener('click', this.handleDropdownClick);
-        
+
         // Clique fora fechar
         document.addEventListener('click', this.handleDocumentClick);
     }
-    
+
     handleDocumentClick(e) {
         if (!this.isOpen) return;
         if (this.dropdownEl.contains(e.target) || this.btnEl?.contains(e.target)) return;
@@ -207,7 +219,7 @@ class QuickProfileSwitcher {
         this.closeDropdown();
         setTimeout(() => { this.isClosing = false; }, 50);
     }
-    
+
     handleDropdownClick(e) {
         // Toggle da Roleta
         const toggleBtn = e.target.closest('.qps-roulette-btn');
@@ -230,10 +242,10 @@ class QuickProfileSwitcher {
             this.closeDropdown();
         }
     }
-    
+
     handleKeyDown(e) {
         if (!this.isOpen) return;
-        
+
         const items = Array.from(this.dropdownEl.querySelectorAll('.qps-item'));
         if (!items.length) {
             if (e.key === 'Escape') {
@@ -242,9 +254,9 @@ class QuickProfileSwitcher {
             }
             return;
         }
-        
+
         const focusedIndex = items.findIndex(item => item === document.activeElement);
-        
+
         if (e.key === 'ArrowDown') {
             e.preventDefault();
             const next = focusedIndex < items.length - 1 ? focusedIndex + 1 : 0;
@@ -263,7 +275,7 @@ class QuickProfileSwitcher {
             }
         }
     }
-    
+
     buildHeader() {
         // Ícone de dado (Dice)
         const diceSvg = `
@@ -275,7 +287,7 @@ class QuickProfileSwitcher {
             <path d="M8 16h.01"></path>
             <path d="M16 16h.01"></path>
         </svg>`;
-        
+
         return `
             <div class="qps-header">
                 <span class="qps-title">Connection Profiles</span>
@@ -297,7 +309,7 @@ class QuickProfileSwitcher {
             container.innerHTML = `<div class="qps-empty">Nenhum perfil encontrado.<br>Crie um em API Connections.</div>`;
             return;
         }
-        
+
         container.innerHTML = this.cachedProfiles.map(name => {
             const active = name === this.activeProfile;
             return `<div class="qps-item ${active ? 'active' : ''}"
@@ -315,7 +327,7 @@ class QuickProfileSwitcher {
         // Renderização imediata (Stale-while-revalidate)
         this.dropdownEl.innerHTML = this.buildHeader();
         this.renderItems();
-        
+
         // Setup temporário (invisível) para medir
         this.dropdownEl.style.visibility = 'hidden';
         this.dropdownEl.style.display = 'flex';
@@ -339,53 +351,53 @@ class QuickProfileSwitcher {
         });
 
         this.isOpen = true;
-        
+
         // Listener de teclado
         document.addEventListener('keydown', this.handleKeyDown);
 
         // Fetch de dados atuais (background)
         const [freshProfiles, freshActive] = await Promise.all([this.fetchProfiles(), this.fetchActiveProfile()]);
-        
+
         let needsUpdate = false;
         if (JSON.stringify(freshProfiles) !== JSON.stringify(this.cachedProfiles) || freshActive !== this.activeProfile) {
             this.cachedProfiles = freshProfiles || [];
             this.activeProfile = freshActive;
             needsUpdate = true;
         }
-        
+
         if (needsUpdate && this.isOpen) {
             this.renderItems();
             this.updateTooltip();
         }
     }
-    
+
     closeDropdown() {
         if (!this.isOpen) return;
         this.dropdownEl?.classList.remove('open');
         this.btnEl?.classList.remove('active');
         this.btnEl?.focus(); // Devolve o foco ao botão
         this.isOpen = false;
-        
+
         document.removeEventListener('keydown', this.handleKeyDown);
     }
-    
+
     async refreshState() {
         const [freshProfiles, freshActive] = await Promise.all([this.fetchProfiles(), this.fetchActiveProfile()]);
         this.cachedProfiles = freshProfiles || [];
         this.activeProfile = freshActive;
         this.updateTooltip();
-        
+
         if (this.isOpen) {
             this.renderItems();
         }
     }
-    
+
     updateTooltip() {
         if (this.btnEl) {
             this.btnEl.title = this.activeProfile ? `Perfil: ${this.activeProfile}` : 'Connection Profiles';
         }
     }
-    
+
     escapeHtml(str) {
         return String(str)
             .replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -401,7 +413,7 @@ jQuery(async () => {
     try {
         const { eventSource, event_types } = SillyTavern.getContext();
         eventSource.on(event_types.APP_READY, () => quickProfileSwitcher.init());
-        
+
         // Failsafe caso APP_READY já tenha disparado
         setTimeout(() => quickProfileSwitcher.init(), 1500);
     } catch (e) {

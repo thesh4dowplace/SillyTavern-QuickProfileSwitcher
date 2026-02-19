@@ -39,14 +39,14 @@
 #qps-dropdown {
     position: fixed;
     background: var(--SmartThemeBlurTintColor, rgba(22, 22, 32, 0.97));
-    border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.12));
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.12));
     border-radius: 10px;
     min-width: 220px;
     max-width: 290px;
     max-height: 320px;
     overflow: hidden;
     z-index: 9999;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.2);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2);
     display: none;
     flex-direction: column;
     backdrop-filter: blur(14px);
@@ -70,7 +70,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 10px 14px 7px;
-    border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.08));
+    border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.08));
     flex-shrink: 0;
 }
 
@@ -108,7 +108,8 @@
     color: var(--SmartThemeEmColor, var(--SmartThemeQuoteColor, #ffb703));
     opacity: 1;
     background: rgba(255, 255, 255, 0.06);
-    filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.2));
+    /* Efeito de "vazamento" (Neon Glow) usando a cor dinâmica do tema */
+    filter: drop-shadow(0 0 5px var(--SmartThemeQuoteColor, #ffb703)) drop-shadow(0 0 10px var(--SmartThemeQuoteColor, #ffb703));
 }
 
 .qps-roulette-btn.active svg {
@@ -117,9 +118,17 @@
 }
 
 @keyframes qps-dice-roll {
-    0% { transform: rotate(0deg) scale(1); }
-    50% { transform: rotate(18deg) scale(1.1); }
-    100% { transform: rotate(0deg) scale(1); }
+    0% {
+        transform: rotate(0deg) scale(1);
+    }
+
+    50% {
+        transform: rotate(18deg) scale(1.1);
+    }
+
+    100% {
+        transform: rotate(0deg) scale(1);
+    }
 }
 
 /* ── Itens ───────────────────────────────────────────────────────────────── */
@@ -140,13 +149,15 @@
     transition: background 0.15s ease, padding-left 0.15s ease;
     user-select: none;
     position: relative;
-    outline: none; /* remove borda padrão do tabindex */
+    outline: none;
+    /* remove borda padrão do tabindex */
 }
 
 .qps-item:hover,
 .qps-item:focus-visible {
-    background: rgba(255,255,255,0.06);
-    padding-left: 18px; /* micro interatividade */
+    background: rgba(255, 255, 255, 0.06);
+    padding-left: 18px;
+    /* micro interatividade */
 }
 
 /* Item ativo: destaque de cor + fundo sutil */
@@ -202,11 +213,42 @@
     line-height: 1.6;
 }
 
-.qps-items-container::-webkit-scrollbar { width: 4px; }
+.qps-items-container::-webkit-scrollbar {
+    width: 4px;
+}
+
 .qps-items-container::-webkit-scrollbar-thumb {
-    background: rgba(255,255,255,0.15);
+    background: rgba(255, 255, 255, 0.15);
     border-radius: 4px;
 }
+
 .qps-items-container::-webkit-scrollbar-thumb:hover {
-    background: rgba(255,255,255,0.25);
+    background: rgba(255, 255, 255, 0.25);
+}
+
+/* ── Animações Extra ─────────────────────────────────────────────────────── */
+
+/* Efeito de sucesso na troca da Roleta (Piscar Neon) */
+@keyframes qps-neon-blink {
+    0% {
+        filter: drop-shadow(0 0 0px transparent);
+        color: inherit;
+        transform: scale(1) rotate(0deg);
+    }
+
+    15% {
+        filter: drop-shadow(0 0 6px var(--SmartThemeQuoteColor, #8ecae6)) drop-shadow(0 0 14px var(--SmartThemeQuoteColor, #8ecae6));
+        color: var(--SmartThemeQuoteColor, #8ecae6);
+        transform: scale(1.2) rotate(15deg);
+    }
+
+    100% {
+        filter: drop-shadow(0 0 0px transparent);
+        color: inherit;
+        transform: scale(1) rotate(0deg);
+    }
+}
+
+.qps-roulette-success {
+    animation: qps-neon-blink 1.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
