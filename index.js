@@ -86,8 +86,13 @@ function createChevronUI() {
         // Evita que clicar no chevron "vaze" o clique para fora e feche o menu na mesma hora
         e.stopPropagation();
 
-        chevronBtn.classList.toggle('active'); // Gira a setinha
+        const isActive = chevronBtn.classList.toggle('active'); // Gira a setinha
         menuContainer.classList.toggle('show'); // Mostra/Esconde a caixa do menu
+
+        // Puxa a lista fresca no momento que abrir
+        if (isActive) {
+            populateProfilesList();
+        }
     });
 
     // Truque mestre: Se o usuário clicar fora do menu, ele fecha sozinho (como um popup real)
@@ -146,7 +151,11 @@ async function populateProfilesList() {
     const listContainer = document.getElementById('qps-profiles-list');
     if (!listContainer) return;
 
-    listContainer.innerHTML = '<div style="text-align: center; color: var(--SmartThemeQuoteColor); font-style: italic;">Loading...</div>';
+    // Apenas põe a label de loading se a caixa estiver *completamente vazia* (primeiro boot)
+    // Isso evita "piscar" e estragar a fluidez visual quando a lista recarregar com o menu aberto
+    if (listContainer.childElementCount === 0 || listContainer.innerHTML.includes("Loading")) {
+        listContainer.innerHTML = '<div style="text-align: center; color: var(--SmartThemeQuoteColor); font-style: italic;">Loading...</div>';
+    }
 
     try {
         const rawList = await runCommand('/profile-list');
@@ -224,11 +233,8 @@ async function populateProfilesList() {
             item.addEventListener('click', async () => {
                 await runCommand(`/profile ${name}`);
 
-                // Recarrega o state para trocar a bolinha
+                // Apenas recarregamos a interface mantendo ela aberta pra dar feedback dinâmico visual!
                 populateProfilesList();
-
-                document.getElementById('qps-menu-container').classList.remove('show');
-                document.getElementById('qps-chevron-btn').classList.remove('active');
             });
 
             listContainer.appendChild(item);
@@ -302,20 +308,30 @@ jQuery(async () => {
     populateProfilesList();
 
     // ==========================================
-    // Eventos do Sistema: A Roleta "Dice" 
+    // Eventos do Sistema: A Roleta "Dice" & Sincronia
     // ==========================================
     try {
         const { eventSource, event_types } = getContext();
-        if (eventSource && event_types && event_types.GENERATION_STARTED) {
-            // Em cada vez que o SillyTavern começa a gerar uma reposta ou a gente envia...
-            eventSource.on(event_types.GENERATION_STARTED, async () => {
-                // ...Só rodamos a roleta se o dado estiver ligado e existir perfis tickados!
-                if (qpsSettings.is_random_active) {
-                    await triggerRandomProfile();
-                }
-            });
+        if (eventSource && event_types) {
+
+            // 1. Interceptação do envio pro dado rodar (se ativo)
+            if (event_types.GENERATION_STARTED) {
+                eventSource.on(event_types.GENERATION_STARTED, async () => {
+                    if (qpsSettings.is_random_active) {
+                        await triggerRandomProfile();
+                    }
+                });
+            }
+
+            // 2. Se o usuário mudar o provedor "por fora" no menu nativo do SillyTavern, 
+            // a extensão intercepta isso e atualiza em tempo real as bolinhas lá dentro se estiver aberto!
+            if (event_types.CONNECTION_PROFILE_LOADED) {
+                eventSource.on(event_types.CONNECTION_PROFILE_LOADED, () => {
+                    populateProfilesList();
+                });
+            }
         }
     } catch (e) {
-        console.error("[Quick-Profile-Switcher] Erro ao engatar os eventos de roleta:", e);
+        console.error("[Quick-Profile-Switcher] Erro ao engatar nos eventos globais:", e);
     }
 });
