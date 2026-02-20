@@ -1,14 +1,12 @@
 {
     "display_name": "Quick Profile Switcher",
-    "name": "quick-profile-switcher",
-    "version": "1.0.0",
-    "description": "Adds a profile switcher button to the chat input bar. Seletor correto (#rightSendForm), perfis via /profile-list.",
-    "author": "custom",
-    "homepage": "",
+    "loading_order": 50,
     "requires": [],
     "optional": [],
     "js": "index.js",
     "css": "style.css",
-    "default_enabled": true,
-    "generate_interceptor": false
+    "author": "Antigravity & Junior Dev",
+    "version": "2.0.0",
+    "description": "V2: Troca rica de perfis de conexão com Roleta Inteligente embutida.",
+    "homePage": ""
 }

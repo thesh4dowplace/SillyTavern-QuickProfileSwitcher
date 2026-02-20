@@ -1,423 +1,321 @@
 /**
- * Quick Profile Switcher v2.0.0 — SillyTavern Extension
- *
- * Adds a quick-access button to the chat input bar for switching
- * Connection Profiles without leaving the conversation.
+ * Quick Profile Switcher V2
  * 
- * Author: custom
- * License: MIT
+ * Uma extensão completa para troca e sorteio inteligente de provedores de API / Connections baseada 
+ * numa arquitetura CSS modular livre de bugs de inputs nativos.
+ * Evolução da extensão base. Projetada para fluidez total.
  */
 
-const EXT_NAME = 'Quick Profile Switcher';
+import { extension_settings, getContext } from "../../../extensions.js";
 
-class QuickProfileSwitcher {
-    constructor() {
-        this.executeSlashCommands = null;
-        this.dropdownEl = null;
-        this.btnEl = null;
-        this.isOpen = false;
-        this.isClosing = false;
+const extensionName = "Quick-Profile-Switcher";
+const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
 
-        this.cachedProfiles = [];
-        this.activeProfile = null;
+// Configurações padrão caso o usuário esteja abrindo pela primeira vez
+const defaultSettings = {
+    is_random_active: false,
+    selected_profiles_list: []
+};
 
-        this.isRouletteEnabled = false;
-        this.hasInitialized = false;
+let qpsSettings = defaultSettings;
 
-        // Bind methods
-        this.handleDocumentClick = this.handleDocumentClick.bind(this);
-        this.handleDropdownClick = this.handleDropdownClick.bind(this);
-        this.handleKeyDown = this.handleKeyDown.bind(this);
-        this.onMessageRendered = this.onMessageRendered.bind(this);
-        this.refreshState = this.refreshState.bind(this);
-        this.toggleDropdown = this.toggleDropdown.bind(this);
-        this.injectButton = this.injectButton.bind(this);
-    }
+/**
+ * Função principal que injeta o UI no botão de enviar e cria o Menu Drop-up.
+ * Analogia: É como soldar uma peça extra no motor do carro.
+ */
+function createChevronUI() {
+    const sendForm = document.getElementById('send_form');
+    if (!sendForm) return;
 
-    async init() {
-        if (this.hasInitialized) return;
-        this.hasInitialized = true;
+    // 1. Criamos o nosso botão Chevron
+    const chevronBtn = document.createElement('div');
+    chevronBtn.id = 'qps-chevron-btn';
+    chevronBtn.title = 'Quick Profile Switcher';
+    chevronBtn.innerHTML = '<i class="fa-solid fa-chevron-up"></i>';
 
-        await this.loadSlashCommandRunner();
-        this.createDropdown();
-        this.injectButton();
-        this.registerEvents();
-    }
+    // 2. Criamos a "Janelinha" do Menu Drop-up
+    const menuContainer = document.createElement('div');
+    menuContainer.id = 'qps-menu-container';
 
-    async loadSlashCommandRunner() {
-        try {
-            const mod = await import('../../../script.js');
-            this.executeSlashCommands = mod.executeSlashCommandsWithOptions ?? mod.executeSlashCommands;
-        } catch {
-            const ctx = SillyTavern.getContext();
-            this.executeSlashCommands = ctx.executeSlashCommandsWithOptions ?? ctx.executeSlashCommands ?? null;
-        }
-    }
-
-    registerEvents() {
-        try {
-            const { eventSource, event_types } = SillyTavern.getContext();
-            if (event_types.CONNECTION_PROFILE_LOADED) {
-                eventSource.on(event_types.CONNECTION_PROFILE_LOADED, this.refreshState);
-            }
-
-            // Roulette triggers on messages
-            if (event_types.USER_MESSAGE_RENDERED) {
-                eventSource.on(event_types.USER_MESSAGE_RENDERED, this.onMessageRendered);
-            }
-            if (event_types.CHARACTER_MESSAGE_RENDERED) {
-                eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, this.onMessageRendered);
-            }
-        } catch (e) {
-            console.warn(`[${EXT_NAME}] Event registration issue:`, e);
-        }
-    }
-
-    async onMessageRendered() {
-        if (!this.isRouletteEnabled) return;
-        if (this.cachedProfiles.length < 2) return;
-
-        // Pick a random profile different from the current one
-        const available = this.cachedProfiles.filter(p => p !== this.activeProfile);
-        if (available.length === 0) return;
-
-        const randomProfile = available[Math.floor(Math.random() * available.length)];
-        console.log(`[${EXT_NAME}] Roulette rolling to: ${randomProfile}`);
-        // Troca silenciosa para não poluir os toasts
-        const success = await this.switchProfile(randomProfile, true);
-
-        // Se trocou com sucesso, pisca o chevron com o efeito neon
-        if (success && this.btnEl) {
-            const icon = this.btnEl.querySelector('.qps-chevron-icon');
-            if (icon) {
-                icon.classList.remove('qps-roulette-success');
-                void icon.offsetWidth; // Força reflow para reiniciar a animação CSS
-                icon.classList.add('qps-roulette-success');
-            }
-        }
-    }
-
-    // ── Slash commands ────────────────────────────────────────────────────────
-
-    async runCommand(cmd) {
-        if (!this.executeSlashCommands) return null;
-        try {
-            const result = await this.executeSlashCommands(cmd, { showOutput: false, handleParserErrors: false });
-            return result?.pipe ?? result?.output ?? result ?? null;
-        } catch (e) {
-            console.warn(`[${EXT_NAME}] Comando falhou: ${cmd}`, e);
-            return null;
-        }
-    }
-
-    async fetchProfiles() {
-        try {
-            const raw = await this.runCommand('/profile-list');
-            if (!raw) return [];
-            const parsed = JSON.parse(raw);
-            return Array.isArray(parsed) ? parsed : [];
-        } catch { return []; }
-    }
-
-    async fetchActiveProfile() {
-        try {
-            const raw = await this.runCommand('/profile');
-            return raw?.trim() || null;
-        } catch { return null; }
-    }
-
-    async switchProfile(name, silent = false) {
-        try {
-            await this.runCommand(`/profile ${name}`);
-            this.activeProfile = name;
-            this.updateTooltip();
-            if (this.isOpen) {
-                this.renderItems();
-            }
-            return true;
-        } catch (e) {
-            console.error(`[${EXT_NAME}] Falha ao trocar:`, e);
-            if (!silent && typeof toastr !== 'undefined') {
-                toastr.error(`Não foi possível trocar para "${name}"`, EXT_NAME);
-            }
-            return false;
-        }
-    }
-
-    // ── DOM: botão ────────────────────────────────────────────────────────────
-
-    injectButton() {
-        if (document.getElementById('quick-profile-btn')) return;
-
-        const rightBar = document.getElementById('rightSendForm');
-        if (!rightBar) {
-            setTimeout(this.injectButton, 500);
-            return;
-        }
-
-        this.btnEl = document.createElement('div');
-        this.btnEl.id = 'quick-profile-btn';
-        this.btnEl.className = 'interactable';
-        this.btnEl.title = 'Connection Profiles';
-        this.btnEl.setAttribute('tabindex', '0');
-        this.btnEl.setAttribute('role', 'button');
-        this.btnEl.setAttribute('aria-label', 'Open profile switcher');
-
-        // Chevron Up SVG
-        this.btnEl.innerHTML = `
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18"
-                 viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                 class="qps-chevron-icon">
-                <polyline points="18 15 12 9 6 15"></polyline>
-            </svg>
-        `;
-
-        this.btnEl.addEventListener('click', this.toggleDropdown);
-
-        // Permitir Enter/Espaço no botão principal
-        this.btnEl.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                this.toggleDropdown();
-            }
-        });
-
-        const sendBut = document.getElementById('send_but');
-        sendBut ? rightBar.insertBefore(this.btnEl, sendBut) : rightBar.appendChild(this.btnEl);
-
-        this.refreshState();
-    }
-
-    toggleDropdown() {
-        if (this.isClosing) { this.isClosing = false; return; }
-        this.isOpen ? this.closeDropdown() : this.openDropdown();
-    }
-
-    // ── DOM: dropdown ─────────────────────────────────────────────────────────
-
-    createDropdown() {
-        if (document.getElementById('qps-dropdown')) return;
-
-        this.dropdownEl = document.createElement('div');
-        this.dropdownEl.id = 'qps-dropdown';
-        this.dropdownEl.setAttribute('role', 'listbox');
-        this.dropdownEl.setAttribute('tabindex', '-1');
-        document.body.appendChild(this.dropdownEl);
-
-        // Delegação de eventos de clique no dropdown (Performance)
-        this.dropdownEl.addEventListener('click', this.handleDropdownClick);
-
-        // Clique fora fechar
-        document.addEventListener('click', this.handleDocumentClick);
-    }
-
-    handleDocumentClick(e) {
-        if (!this.isOpen) return;
-        if (this.dropdownEl.contains(e.target) || this.btnEl?.contains(e.target)) return;
-        this.isClosing = true;
-        this.closeDropdown();
-        setTimeout(() => { this.isClosing = false; }, 50);
-    }
-
-    handleDropdownClick(e) {
-        // Toggle da Roleta
-        const toggleBtn = e.target.closest('.qps-roulette-btn');
-        if (toggleBtn) {
-            e.stopPropagation();
-            this.isRouletteEnabled = !this.isRouletteEnabled;
-            toggleBtn.classList.toggle('active', this.isRouletteEnabled);
-            toggleBtn.title = this.isRouletteEnabled ? 'Profile Roulette: ON' : 'Profile Roulette: OFF';
-            return;
-        }
-
-        // Seleção de Perfil
-        const item = e.target.closest('.qps-item');
-        if (item) {
-            e.stopPropagation();
-            const name = item.dataset.profile;
-            if (name && name !== this.activeProfile) {
-                this.switchProfile(name); // Não é silent (mostra erro se houver)
-            }
-            this.closeDropdown();
-        }
-    }
-
-    handleKeyDown(e) {
-        if (!this.isOpen) return;
-
-        const items = Array.from(this.dropdownEl.querySelectorAll('.qps-item'));
-        if (!items.length) {
-            if (e.key === 'Escape') {
-                e.preventDefault();
-                this.closeDropdown();
-            }
-            return;
-        }
-
-        const focusedIndex = items.findIndex(item => item === document.activeElement);
-
-        if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            const next = focusedIndex < items.length - 1 ? focusedIndex + 1 : 0;
-            items[next].focus();
-        } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            const prev = focusedIndex > 0 ? focusedIndex - 1 : items.length - 1;
-            items[prev].focus();
-        } else if (e.key === 'Escape') {
-            e.preventDefault();
-            this.closeDropdown();
-        } else if (e.key === 'Enter' || e.key === ' ') {
-            if (focusedIndex !== -1) {
-                e.preventDefault();
-                items[focusedIndex].click();
-            }
-        }
-    }
-
-    buildHeader() {
-        // Ícone de dado (Dice)
-        const diceSvg = `
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
-            <path d="M8 8h.01"></path>
-            <path d="M16 8h.01"></path>
-            <path d="M12 12h.01"></path>
-            <path d="M8 16h.01"></path>
-            <path d="M16 16h.01"></path>
-        </svg>`;
-
-        return `
-            <div class="qps-header">
-                <span class="qps-title">Connection Profiles</span>
-                <div class="qps-roulette-btn ${this.isRouletteEnabled ? 'active' : ''}" 
-                     title="Profile Roulette: ${this.isRouletteEnabled ? 'ON' : 'OFF'}"
-                     role="button" tabindex="0">
-                    ${diceSvg}
-                </div>
+    // O esqueleto da nossa janela com "Header" (apenas o botão de dado alinhado à direita) e "Body" (a lista)
+    menuContainer.innerHTML = `
+        <div class="qps-menu-header">
+            <i id="qps-dice-btn" class="fa-solid fa-dice" title="Toggle Random Mode" style="cursor: pointer; transition: all 0.2s ease; font-size: 1.1rem;"></i>
+        </div>
+        <div class="qps-menu-body" id="qps-profiles-list">
+            <div style="text-align: center; color: var(--SmartThemeQuoteColor); font-style: italic;">
+                Loading profiles...
             </div>
-            <div class="qps-items-container"></div>
-        `;
+        </div>
+    `;
+
+    // 2.5 Configurando o Dado (Estado Inicial) e Efeito
+    const diceBtn = menuContainer.querySelector('#qps-dice-btn');
+    if (qpsSettings.is_random_active) {
+        diceBtn.style.color = 'var(--SmartThemeQuoteColor)';
+        diceBtn.style.textShadow = '0 0 8px var(--SmartThemeQuoteColor)';
     }
 
-    renderItems() {
-        const container = this.dropdownEl.querySelector('.qps-items-container');
-        if (!container) return;
+    diceBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        qpsSettings.is_random_active = !qpsSettings.is_random_active;
+        extension_settings[extensionName] = qpsSettings;
 
-        if (!this.cachedProfiles.length) {
-            container.innerHTML = `<div class="qps-empty">Nenhum perfil encontrado.<br>Crie um em API Connections.</div>`;
-            return;
+        // Efeito Visual do Dado (Acende e dá "Glow")
+        if (qpsSettings.is_random_active) {
+            diceBtn.style.color = 'var(--SmartThemeQuoteColor)';
+            diceBtn.style.textShadow = '0 0 8px var(--SmartThemeQuoteColor)';
+        } else {
+            diceBtn.style.color = '';
+            diceBtn.style.textShadow = '';
         }
 
-        container.innerHTML = this.cachedProfiles.map(name => {
-            const active = name === this.activeProfile;
-            return `<div class="qps-item ${active ? 'active' : ''}"
-                         role="option" tabindex="0" data-profile="${this.escapeHtml(name)}">
-                        <span class="qps-dot">${active ? '●' : ''}</span>
-                        <span class="qps-name">${this.escapeHtml(name)}</span>
-                        ${active ? '<span class="qps-check">✓</span>' : ''}
-                    </div>`;
-        }).join('');
-    }
-
-    async openDropdown() {
-        if (!this.dropdownEl || !this.btnEl || this.isOpen) return;
-
-        // Renderização imediata (Stale-while-revalidate)
-        this.dropdownEl.innerHTML = this.buildHeader();
-        this.renderItems();
-
-        // Setup temporário (invisível) para medir
-        this.dropdownEl.style.visibility = 'hidden';
-        this.dropdownEl.style.display = 'flex';
-
-        const rect = this.btnEl.getBoundingClientRect();
-        const h = this.dropdownEl.offsetHeight;
-        const w = this.dropdownEl.offsetWidth;
-
-        let top = rect.top - h - 6;
-        if (top < 8) top = rect.bottom + 6;
-        let left = rect.left;
-        if (left + w > window.innerWidth - 8) left = window.innerWidth - w - 8;
-
-        this.dropdownEl.style.top = `${top}px`;
-        this.dropdownEl.style.left = `${left}px`;
-        this.dropdownEl.style.visibility = '';
-
-        requestAnimationFrame(() => {
-            this.dropdownEl.classList.add('open');
-            this.btnEl.classList.add('active');
-        });
-
-        this.isOpen = true;
-
-        // Listener de teclado
-        document.addEventListener('keydown', this.handleKeyDown);
-
-        // Fetch de dados atuais (background)
-        const [freshProfiles, freshActive] = await Promise.all([this.fetchProfiles(), this.fetchActiveProfile()]);
-
-        let needsUpdate = false;
-        if (JSON.stringify(freshProfiles) !== JSON.stringify(this.cachedProfiles) || freshActive !== this.activeProfile) {
-            this.cachedProfiles = freshProfiles || [];
-            this.activeProfile = freshActive;
-            needsUpdate = true;
+        // Ativa a exibição das checkboxes na lista
+        const listBody = document.getElementById('qps-profiles-list');
+        if (listBody) {
+            if (qpsSettings.is_random_active) {
+                listBody.classList.add('roulette-mode');
+            } else {
+                listBody.classList.remove('roulette-mode');
+            }
         }
+    });
 
-        if (needsUpdate && this.isOpen) {
-            this.renderItems();
-            this.updateTooltip();
+    // 3. Adicionamos a ação de clique do Chevron para abrir/fechar o Menu
+    chevronBtn.addEventListener('click', (e) => {
+        // Evita que clicar no chevron "vaze" o clique para fora e feche o menu na mesma hora
+        e.stopPropagation();
+
+        chevronBtn.classList.toggle('active'); // Gira a setinha
+        menuContainer.classList.toggle('show'); // Mostra/Esconde a caixa do menu
+    });
+
+    // Truque mestre: Se o usuário clicar fora do menu, ele fecha sozinho (como um popup real)
+    document.addEventListener('click', (e) => {
+        if (!menuContainer.contains(e.target) && e.target !== chevronBtn) {
+            chevronBtn.classList.remove('active');
+            menuContainer.classList.remove('show');
         }
-    }
+    });
 
-    closeDropdown() {
-        if (!this.isOpen) return;
-        this.dropdownEl?.classList.remove('open');
-        this.btnEl?.classList.remove('active');
-        this.btnEl?.focus(); // Devolve o foco ao botão
-        this.isOpen = false;
+    // Evita o menu fechar se o cara clicar dentro dele
+    menuContainer.addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
 
-        document.removeEventListener('keydown', this.handleKeyDown);
-    }
+    // 4. Injetamos O MANU na mesma "zona" do botão de envio
+    sendForm.appendChild(menuContainer);
 
-    async refreshState() {
-        const [freshProfiles, freshActive] = await Promise.all([this.fetchProfiles(), this.fetchActiveProfile()]);
-        this.cachedProfiles = freshProfiles || [];
-        this.activeProfile = freshActive;
-        this.updateTooltip();
-
-        if (this.isOpen) {
-            this.renderItems();
-        }
-    }
-
-    updateTooltip() {
-        if (this.btnEl) {
-            this.btnEl.title = this.activeProfile ? `Perfil: ${this.activeProfile}` : 'Connection Profiles';
-        }
-    }
-
-    escapeHtml(str) {
-        return String(str)
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    // 5. Injetamos o CHEVRON exatamente à esquerda do botão de enviar (send_but)
+    const sendBtn = document.getElementById('send_but');
+    if (sendBtn) {
+        sendBtn.parentNode.insertBefore(chevronBtn, sendBtn);
+    } else {
+        sendForm.appendChild(chevronBtn);
     }
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────
+// ==========================================
+// Comunicação com o SillyTavern Core (Slash Commands)
+// ==========================================
 
-const quickProfileSwitcher = new QuickProfileSwitcher();
+let executeSlashCommands = null;
 
-jQuery(async () => {
+async function loadSlashCommandRunner() {
     try {
-        const { eventSource, event_types } = SillyTavern.getContext();
-        eventSource.on(event_types.APP_READY, () => quickProfileSwitcher.init());
+        const mod = await import('../../../script.js');
+        executeSlashCommands = mod.executeSlashCommandsWithOptions ?? mod.executeSlashCommands;
+    } catch {
+        const ctx = getContext();
+        executeSlashCommands = ctx.executeSlashCommandsWithOptions ?? ctx.executeSlashCommands ?? null;
+    }
+}
 
-        // Failsafe caso APP_READY já tenha disparado
-        setTimeout(() => quickProfileSwitcher.init(), 1500);
+async function runCommand(cmd) {
+    if (!executeSlashCommands) return null;
+    try {
+        const result = await executeSlashCommands(cmd, { showOutput: false, handleParserErrors: false });
+        return result?.pipe ?? result?.output ?? result ?? null;
     } catch (e) {
-        console.error(`[${EXT_NAME}] Erro crítico no setup:`, e);
-        setTimeout(() => quickProfileSwitcher.init(), 2000);
+        console.warn(`[Quick-Profile-Switcher] Command failed: ${cmd}`, e);
+        return null;
+    }
+}
+
+async function populateProfilesList() {
+    const listContainer = document.getElementById('qps-profiles-list');
+    if (!listContainer) return;
+
+    listContainer.innerHTML = '<div style="text-align: center; color: var(--SmartThemeQuoteColor); font-style: italic;">Loading...</div>';
+
+    try {
+        const rawList = await runCommand('/profile-list');
+        const activeProfile = (await runCommand('/profile'))?.trim();
+
+        let profiles = rawList ? JSON.parse(rawList) : [];
+
+        if (!Array.isArray(profiles) || profiles.length === 0) {
+            listContainer.innerHTML = '<div style="text-align: center; color: var(--SmartThemeQuoteColor);">No profiles found.</div>';
+            return;
+        }
+
+        // Ordenando Alfabeticamente (A-Z)
+        profiles.sort((a, b) => a.localeCompare(b));
+
+        listContainer.innerHTML = ''; // Limpa o "Loading"
+
+        // Se o dropdown iniciar com a roleta ligada, a classe já garante as ticks na tela
+        if (qpsSettings.is_random_active) {
+            listContainer.classList.add('roulette-mode');
+        }
+
+        profiles.forEach(name => {
+            const isActive = name === activeProfile;
+
+            // Criando visual de cada "linha" da lista via CSS classes
+            const item = document.createElement('div');
+            item.className = 'qps-profile-item' + (isActive ? ' active-profile' : '');
+
+            // --- LADO ESQUERDO (Nome do Perfil) ---
+            const leftBlock = document.createElement('div');
+            leftBlock.className = 'qps-profile-left-block';
+            leftBlock.innerHTML = `<span>${name}</span> ${isActive ? '<i class="fa-solid fa-check"></i>' : ''}`;
+
+            // --- LADO DIREITO (Checkbox visual via FontAwesome no roulette-mode) ---
+            const rightBlock = document.createElement('div');
+            rightBlock.className = 'qps-profile-checkbox-container';
+            rightBlock.title = 'Add to roulette';
+
+            const checkboxIcon = document.createElement('i');
+            const isChecked = qpsSettings.selected_profiles_list.includes(name);
+
+            // Define o visual inicial baseado em estar na lista ou não
+            checkboxIcon.className = 'qps-profile-checkbox-icon ' + (isChecked ? 'fa-solid fa-square-check' : 'fa-regular fa-square');
+            if (isChecked) checkboxIcon.style.color = 'var(--SmartThemeQuoteColor)';
+
+            rightBlock.appendChild(checkboxIcon);
+
+            // Mudança interativa ao clicar e salvamento
+            rightBlock.addEventListener('click', (e) => {
+                e.stopPropagation();
+
+                const currentlyChecked = qpsSettings.selected_profiles_list.includes(name);
+
+                if (currentlyChecked) {
+                    // Desmarcar
+                    qpsSettings.selected_profiles_list = qpsSettings.selected_profiles_list.filter(n => n !== name);
+                    checkboxIcon.className = 'qps-profile-checkbox-icon fa-regular fa-square';
+                    checkboxIcon.style.color = '';
+                } else {
+                    // Marcar
+                    qpsSettings.selected_profiles_list.push(name);
+                    checkboxIcon.className = 'qps-profile-checkbox-icon fa-solid fa-square-check';
+                    checkboxIcon.style.color = 'var(--SmartThemeQuoteColor)';
+                }
+
+                extension_settings[extensionName] = qpsSettings;
+            });
+
+            // Adiciona blocos à linha
+            item.appendChild(leftBlock);
+            item.appendChild(rightBlock);
+
+            // Clicar em literalmente qualquer área da linha além do checkbox
+            item.addEventListener('click', async () => {
+                await runCommand(`/profile ${name}`);
+
+                // Recarrega o state para trocar a bolinha
+                populateProfilesList();
+
+                document.getElementById('qps-menu-container').classList.remove('show');
+                document.getElementById('qps-chevron-btn').classList.remove('active');
+            });
+
+            listContainer.appendChild(item);
+        });
+
+    } catch (e) {
+        console.error("Erro ao puxar profiles:", e);
+        listContainer.innerHTML = '<div style="color: red;">Failed to load.</div>';
+    }
+}
+
+async function triggerRandomProfile() {
+    const pool = qpsSettings.selected_profiles_list;
+
+    // Se não tiver ninguém selecionado, não faz nada
+    if (!pool || pool.length === 0) return;
+
+    const activeProfile = (await runCommand('/profile'))?.trim();
+
+    // Cuidando para tentar não repetir o mesmo perfil de sempre (se houver mais de 1 opção)
+    let candidates = pool;
+    if (pool.length > 1 && pool.includes(activeProfile)) {
+        candidates = pool.filter(p => p !== activeProfile);
+    }
+
+    // Sorteio
+    const randomIndex = Math.floor(Math.random() * candidates.length);
+    const chosenProfile = candidates[randomIndex];
+
+    // Efeitos Visuais de Processamento usando as classes nativas do FontAwesome do ST
+    const chevronIcon = document.querySelector('#qps-chevron-btn i');
+    if (chevronIcon) {
+        chevronIcon.classList.add('fa-spin');
+        setTimeout(() => chevronIcon.classList.remove('fa-spin'), 1000);
+    }
+
+    const diceBtn = document.getElementById('qps-dice-btn');
+    if (diceBtn) {
+        diceBtn.classList.add('fa-spin');
+        setTimeout(() => diceBtn.classList.remove('fa-spin'), 1000);
+    }
+
+    // Pede educadamente pro ST mudar a config instantaneamente
+    await runCommand(`/profile ${chosenProfile}`);
+
+    // Atualiza o painel no fundo (caso esteja aberto, pra bolinha "check" pular)
+    populateProfilesList();
+}
+
+/**
+ * Ponto de entrada da extensão.
+ * O SillyTavern roda isso quando toda a página termina de carregar.
+ */
+jQuery(async () => {
+    // Carrega as configurações guardadas ou usa as padrões
+    const settings = extension_settings[extensionName] || defaultSettings;
+
+    // Assegura estrutura do objeto para configs antigas ou nulas
+    if (!Array.isArray(settings.selected_profiles_list)) settings.selected_profiles_list = [];
+
+    qpsSettings = settings;
+    extension_settings[extensionName] = qpsSettings;
+
+    // Prepara a injeção do runner
+    await loadSlashCommandRunner();
+
+    // Constrói a UI
+    createChevronUI();
+
+    // Assim que a interface carrega, já busca os perfis no fundo
+    populateProfilesList();
+
+    // ==========================================
+    // Eventos do Sistema: A Roleta "Dice" 
+    // ==========================================
+    try {
+        const { eventSource, event_types } = getContext();
+        if (eventSource && event_types && event_types.GENERATION_STARTED) {
+            // Em cada vez que o SillyTavern começa a gerar uma reposta ou a gente envia...
+            eventSource.on(event_types.GENERATION_STARTED, async () => {
+                // ...Só rodamos a roleta se o dado estiver ligado e existir perfis tickados!
+                if (qpsSettings.is_random_active) {
+                    await triggerRandomProfile();
+                }
+            });
+        }
+    } catch (e) {
+        console.error("[Quick-Profile-Switcher] Erro ao engatar os eventos de roleta:", e);
     }
 });
